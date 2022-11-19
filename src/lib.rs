@@ -597,26 +597,23 @@ pub fn put_iv(price: f64, s: f64, k: f64, rate: f64, maturity: f64) -> Result<f6
     put_iv_guess(price, s, k, rate, maturity, initial_guess)
 }
 
+#[derive(Debug, PartialEq)]
+pub enum OptionType {
+    Call,
+    Put
+}
+
 #[derive(Debug, Serialize)]
 pub struct PricesAndGreeks {
-    pub call_price: f64,
-    pub call_delta: f64,
-    pub call_gamma: f64,
-    pub call_theta: f64,
-    pub call_vega: f64,
-    pub call_rho: f64,
-    pub call_vanna: f64,
-    pub call_vomma: f64,
-    pub call_charm: f64,
-    pub put_price: f64,
-    pub put_delta: f64,
-    pub put_gamma: f64,
-    pub put_theta: f64,
-    pub put_vega: f64,
-    pub put_rho: f64,
-    pub put_vanna: f64,
-    pub put_vomma: f64,
-    pub put_charm: f64,
+    pub price: f64,
+    pub delta: f64,
+    pub gamma: f64,
+    pub theta: f64,
+    pub vega: f64,
+    pub rho: f64,
+    pub vanna: f64,
+    pub vomma: f64,
+    pub charm: f64,
 }
 /// Returns call and put prices and greeks.
 /// Due to caching the complex computations
@@ -647,6 +644,7 @@ pub fn compute_all(
     rate: f64,
     sigma: f64,
     maturity: f64,
+    option_type: OptionType
 ) -> PricesAndGreeks {
     let discount = (-rate * maturity).exp();
     let sqrt_maturity = maturity.sqrt();
@@ -658,69 +656,66 @@ pub fn compute_all(
         let cdf_d1 = cum_norm(d1);
         let cdf_d2 = cum_norm(d2);
         let pdf_d1 = inc_norm(d1);
-
-        let call_price = stock * cdf_d1 - k_discount * cdf_d2;
         let call_delta = cdf_d1;
-        let call_gamma = pdf_d1 / (stock * sqrt_maturity_sigma);
-        let call_theta =
-            -stock * pdf_d1 * sigma / (2.0 * sqrt_maturity) - rate * k_discount * cdf_d2;
-        let call_vega = stock * pdf_d1 * sqrt_maturity_sigma / sigma;
-        let call_rho = k_discount * maturity * cdf_d2;
-        let call_vanna = call_vega / stock * (1.0 - d1 / sqrt_maturity_sigma);
-        let call_vomma = call_vega * d1 * d2 / sigma;
-        let call_charm = -pdf_d1 * (2.0 * rate * maturity - d2 * sqrt_maturity_sigma)
-            / (2.0 * maturity * sqrt_maturity_sigma);
-        let put_price = call_price + k_discount - stock;
         let put_delta = cdf_d1 - 1.0;
-        let put_gamma = call_gamma;
-        let put_theta =
-            -stock * pdf_d1 * sigma / (2.0 * sqrt_maturity) + rate * k_discount * (1.0 - cdf_d2);
-        let put_vega = call_vega;
+        let call_price = stock * cdf_d1 - k_discount * cdf_d2;
+        let put_price = call_price + k_discount - stock;
+        let gamma = pdf_d1 / (stock * sqrt_maturity_sigma);
+        let call_theta = -stock * pdf_d1 * sigma / (2.0 * sqrt_maturity) - rate * k_discount * cdf_d2;
+        let put_theta = -stock * pdf_d1 * sigma / (2.0 * sqrt_maturity) + rate * k_discount * (1.0 - cdf_d2);
+        let vega = stock * pdf_d1 * sqrt_maturity_sigma / sigma;
+        let call_rho = k_discount * maturity * cdf_d2;
         let put_rho = -1.0 * k_discount * maturity * (1.0 - cdf_d2);
-        let put_vanna = call_vanna;
-        let put_vomma = call_vomma;
-        let put_charm = call_charm;
-        PricesAndGreeks {
-            call_price,
-            call_delta,
-            call_gamma,
-            call_theta,
-            call_vega,
-            call_rho,
-            call_vanna,
-            call_vomma,
-            call_charm,
-            put_price,
-            put_delta,
-            put_gamma,
-            put_theta,
-            put_vega,
-            put_rho,
-            put_vanna,
-            put_vomma,
-            put_charm,
+        let vanna = vega / stock * (1.0 - d1 / sqrt_maturity_sigma);
+        let vomma = vega * d1 * d2 / sigma;
+        let charm = -pdf_d1 * (2.0 * rate * maturity - d2 * sqrt_maturity_sigma) / (2.0 * maturity * sqrt_maturity_sigma);
+        if option_type == OptionType::Call {
+            return PricesAndGreeks {
+                price: call_price,
+                delta: call_delta,
+                gamma: gamma,
+                theta: call_theta,
+                vega: vega,
+                rho: call_rho,
+                vanna: vanna,
+                vomma: vomma,
+                charm: charm,
+            };
+        } else {
+            return PricesAndGreeks {
+                price: put_price,
+                delta: put_delta,
+                gamma: gamma,
+                theta: put_theta,
+                vega: vega,
+                rho: put_rho,
+                vanna: vanna,
+                vomma: vomma,
+                charm: charm,
+            };
         }
     } else {
-        PricesAndGreeks {
-            call_price: max_or_zero(stock - strike),
-            call_delta: if stock > strike { 1.0 } else { 0.0 },
-            call_gamma: 0.0,
-            call_theta: 0.0,
-            call_vega: 0.0,
-            call_rho: 0.0,
-            call_vanna: 0.0,
-            call_vomma: 0.0,
-            call_charm: 0.0,
-            put_price: max_or_zero(strike - stock),
-            put_delta: if strike > stock { -1.0 } else { 0.0 },
-            put_gamma: 0.0,
-            put_theta: 0.0,
-            put_vega: 0.0,
-            put_rho: 0.0,
-            put_vanna: 0.0,
-            put_vomma: 0.0,
-            put_charm: 0.0,
-        }
+        let price = if option_type == OptionType::Call {
+            max_or_zero(stock - strike)
+        } else {
+            max_or_zero(strike - stock)
+        };
+        let delta = if option_type == OptionType::Call {
+            if stock > strike { 1.0 } else { 0.0 }
+        } else {
+            if strike > stock { -1.0 } else { 0.0 }
+        };
+        return PricesAndGreeks {
+            price: price,
+            delta: delta,
+            gamma: 0.0,
+            theta: 0.0,
+            vega: 0.0,
+            rho: 0.0,
+            vanna: 0.0,
+            vomma: 0.0,
+            charm: 0.0,
+        };
     }
 }
 
